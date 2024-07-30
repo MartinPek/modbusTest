@@ -43,10 +43,14 @@ regs_lock = Lock()
 register_size = 16
 max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
 print(max_register_range)
+c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
 
 
-def convertValueToRegister(value, value_range, register_count):
-
+def convert_value_to_register(value, value_range, register_count):
+    clipped_value = max(min(value, value_range[1]), value_range[0])
+    if clipped_value != value:
+        print(f"Value: {val} was out of range {value_range}. Clipped to {clipped_value}")
+        value = clipped_value
     abs_range = sum(abs(x) for x in value_range)
     # checking if its a single register write, if so we can already skip all conversion
     if abs_range < max_register_range:
@@ -63,12 +67,24 @@ def convertValueToRegister(value, value_range, register_count):
         return [low_register, high_register]
 
 
-res = convertValueToRegister(500000, (-5000000, +5000000), 2)
+res = convert_value_to_register(500000, (-5000000, +5000000), 2)
 
-c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
 
-resid = 5000000 - 65535
-# (1 << 16)-1
+def set_entry(value, entry_name):
+
+    register_value = convert_value_to_register(500000, (-5000000, +5000000), 2)
+
+    print(c.write_multiple_registers(0x0078, register_value))
+
+    if not (c.last_error and c.last_except):
+        return True
+
+    # does this reset automatically with the next command? no manual function for that listed afaik
+    print(c.last_error_as_txt)
+    print(c.last_except_as_full_txt)
+
+    return False
+
 
 '''
 # 1 << 19 = 524288
@@ -103,11 +119,12 @@ print("testing")
 print(c.write_multiple_registers(0x0078,  res))
 print("success??")
 sleep(3)
+print(c.last_error)
+print(c.last_except)
 print(c.last_error_as_txt)
 print(c.last_except_as_full_txt)
 print(c.write_multiple_registers(0x0078,  [0, 0]))
 exit()
-
 
 
 def setHoldCurrent(percent):
