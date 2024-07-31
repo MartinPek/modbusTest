@@ -20,6 +20,11 @@ regs_lock = Lock()
 
 🔲 Timeouts is very long also doesnt crop up when setting up the device when unplugged
 
+🔲 Error 0x0021 2 Variable holds the error code of the last error. 
+ must be read or set to 0 to clear.
+ — 0
+
+🔲 in case calculating is troublesome  Microstep resolution 0x0048
 
 '''
 
@@ -55,7 +60,7 @@ c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
 def convert_value_to_register(value, value_range, register_count):
     clipped_value = max(min(value, value_range[1]), value_range[0])
     if clipped_value != value:
-        print(f"Value: {val} was out of range {value_range}. Clipped to {clipped_value}")
+        print(f"Value: {value} was out of range {value_range}. Clipped to {clipped_value}")
         value = clipped_value
     abs_range = sum(abs(x) for x in value_range)
     # checking if it's a single register write, if so we can already skip all conversion
@@ -86,15 +91,29 @@ class WriteCommand:
         return False
 
 
+class ReadCommand:
+    def __init__(self, register, register_count=1):
+        self.register = register
+        self.register_count = register_count
+
+    def get_regs(self):
+        regs_l = c.read_holding_registers(self.register, self.register_count )
+
+
 writeActions = {
     "slew": WriteCommand(0x0078, (-5000000, +5000000), 2),
     "holdCurrent": WriteCommand(0x0029, (0, 100), 1),   # default 5
     "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
     "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
-    "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2)
+    "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2),
+    "error": WriteCommand(0x0021, (0,0) ,1)
 }
 
-
+readAction = {
+    "stalled": ReadCommand(0x007B),
+    "moving": ReadCommand(0x004A),
+    "outputFault": ReadCommand(0x004E),
+}
 
 
 '''
@@ -127,6 +146,8 @@ sleep(1)
 writeActions["runCurrent"].set_value(100)
 writeActions["setTorque"].set_value(100)
 writeActions["slew"].set_value(-500000)
+
+# writeActions["error"].set_value(0)
 print("success??")
 sleep(3)
 print(c.last_error)
