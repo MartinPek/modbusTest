@@ -15,6 +15,13 @@ regs = []
 # init a thread lock
 regs_lock = Lock()
 
+'''
+@ TODO: 🔲 ✅
+
+🔲 Timeouts is very long also doesnt crop up when setting up the device when unplugged
+
+
+'''
 
 #   Holding current 0x0029 1 Sets the motor holding current in percent (%) 0 to 100
 # Run current 0x0067 1 Sets the motor run current in percent (%). 1 to 100 25
@@ -42,7 +49,6 @@ regs_lock = Lock()
 
 register_size = 16
 max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
-print(max_register_range)
 c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
 
 
@@ -52,38 +58,43 @@ def convert_value_to_register(value, value_range, register_count):
         print(f"Value: {val} was out of range {value_range}. Clipped to {clipped_value}")
         value = clipped_value
     abs_range = sum(abs(x) for x in value_range)
-    # checking if its a single register write, if so we can already skip all conversion
+    # checking if it's a single register write, if so we can already skip all conversion
     if abs_range < max_register_range:
         return [value]
     else:
-
         high_register = (value >> 16) & 0xFFFF
         low_register = value & 0xFFFF
-
-        for register in range(register_count, 0 , -1):
-            print(register)
-            for i in range(register_size, 0, -1):
-                print(i)
         return [low_register, high_register]
 
 
-res = convert_value_to_register(500000, (-5000000, +5000000), 2)
+class WriteCommand:
+    def __init__(self, register, value_range, register_count):
+        self.register = register
+        self.value_range = value_range
+        self.register_count = register_count
+
+    def set_value(self, value):
+        register_value = convert_value_to_register(value, self.value_range, self.register_count)
+        res = c.write_multiple_registers(self.register, register_value)
+        if not (c.last_error and c.last_except):
+            return True
+
+        # does this reset automatically with the next command? no manual function for that listed afaik
+        print(c.last_error_as_txt)
+        print(c.last_except_as_full_txt)
+
+        return False
 
 
-def set_entry(value, entry_name):
+writeActions = {
+    "slew": WriteCommand(0x0078, (-5000000, +5000000), 2),
+    "holdCurrent": WriteCommand(0x0029, (0, 100), 1),   # default 5
+    "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
+    "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
+    "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2)
+}
 
-    register_value = convert_value_to_register(500000, (-5000000, +5000000), 2)
 
-    print(c.write_multiple_registers(0x0078, register_value))
-
-    if not (c.last_error and c.last_except):
-        return True
-
-    # does this reset automatically with the next command? no manual function for that listed afaik
-    print(c.last_error_as_txt)
-    print(c.last_except_as_full_txt)
-
-    return False
 
 
 '''
@@ -109,14 +120,13 @@ msb should be in the second register?
 
 '''
 
-val = (1 << 16)
-
-print(f"value is {res}")
+print("testing")
 
 print(c.write_multiple_registers(0x0078,  [0, 0]))
 sleep(1)
-print("testing")
-print(c.write_multiple_registers(0x0078,  res))
+writeActions["runCurrent"].set_value(100)
+writeActions["setTorque"].set_value(100)
+writeActions["slew"].set_value(-500000)
 print("success??")
 sleep(3)
 print(c.last_error)
@@ -129,7 +139,7 @@ exit()
 
 def setHoldCurrent(percent):
     print()
-    #c.write_single_register(0x0029, percent)
+    # c.write_single_register(0x0029, percent)
 
 
 def polling_thread():
