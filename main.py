@@ -28,33 +28,9 @@ regs_lock = Lock()
 
 '''
 
-#   Holding current 0x0029 1 Sets the motor holding current in percent (%) 0 to 100
-# Run current 0x0067 1 Sets the motor run current in percent (%). 1 to 100 25
-
-#   Slew axis 0x0078 -
-# 0x0079
-#  4 Slews the axis at velocity in steps/second
-# in the specified ± direction, Slew velocity is
-# independent of 0x008B (maximum velocity).
-#  ±5000000
-
-# Stall flag 0x007B 1 indicates a motor stall (1) or not stalled (0)
-# (Closed loop only).
-#  0/1 0
-
-#  Set torque 0x00A6 1 Sets the motor torque in percent for torque mode
-# operation.
-#  1 – 100 25
-
-#  Slew axis 0x0078 - 0x0079
-#  4 Slews the axis at velocity in steps/second
-# in the specified ± direction, Slew velocity is
-# independent of 0x008B (maximum velocity).
-#  ±5000000
-
 register_size = 16
 max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
-c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
+modbus_client = None
 
 
 def convert_value_to_register(value, value_range, register_count):
@@ -80,13 +56,13 @@ class WriteCommand:
 
     def set_value(self, value):
         register_value = convert_value_to_register(value, self.value_range, self.register_count)
-        res = c.write_multiple_registers(self.register, register_value)
-        if not (c.last_error and c.last_except):
+        res = modbus_client.write_multiple_registers(self.register, register_value)
+        if not (modbus_client.last_error and modbus_client.last_except):
             return True
 
         # does this reset automatically with the next command? no manual function for that listed afaik
-        print(c.last_error_as_txt)
-        print(c.last_except_as_full_txt)
+        print(modbus_client.last_error_as_txt)
+        print(modbus_client.last_except_as_full_txt)
 
         return False
 
@@ -96,8 +72,12 @@ class ReadCommand:
         self.register = register
         self.register_count = register_count
 
-    def get_regs(self):
-        regs_l = c.read_holding_registers(self.register, self.register_count )
+    def get_regs(self, check_for_errors=True):
+        regs_l = modbus_client.read_holding_registers(self.register, self.register_count)
+        if check_for_errors:
+            if regs_l is None:
+                print("communication error, no value returned")
+        return regs_l
 
 
 writeActions = {
@@ -106,13 +86,14 @@ writeActions = {
     "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
     "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
     "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2),
-    "error": WriteCommand(0x0021, (0,0) ,1)
+    "error": WriteCommand(0x0021, (0, 0),1)
 }
 
 readAction = {
     "stalled": ReadCommand(0x007B),
     "moving": ReadCommand(0x004A),
     "outputFault": ReadCommand(0x004E),
+    "error": ReadCommand(0x0021)
 }
 
 
@@ -139,28 +120,38 @@ msb should be in the second register?
 
 '''
 
-print("testing")
 
-print(c.write_multiple_registers(0x0078,  [0, 0]))
-sleep(1)
-writeActions["runCurrent"].set_value(100)
-writeActions["setTorque"].set_value(100)
-writeActions["slew"].set_value(-500000)
+def main():
+    print("initalising device ...")
+    global modbus_client
+    modbus_client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
+    res = readAction["error"].get_regs(False)
+    if res is None:
+        exit("No device found, check connections")
+    print("initialisation successful")
 
-# writeActions["error"].set_value(0)
-print("success??")
-sleep(3)
-print(c.last_error)
-print(c.last_except)
-print(c.last_error_as_txt)
-print(c.last_except_as_full_txt)
-print(c.write_multiple_registers(0x0078,  [0, 0]))
-exit()
+    '''
+    print("testing")
 
+    print(modbus_client.write_multiple_registers(0x0078, [0, 0]))
+    sleep(1)
+    writeActions["runCurrent"].set_value(100)
+    writeActions["setTorque"].set_value(100)
+    writeActions["slew"].set_value(-500000)
+    
+    # writeActions["error"].set_value(0)
+    print("success??")
+    sleep(3)
+    print(modbus_client.last_error)
+    print(modbus_client.last_except)
+    print(modbus_client.last_error_as_txt)
+    print(modbus_client.last_except_as_full_txt)
+    print(modbus_client.write_multiple_registers(0x0078, [0, 0]))
+    exit()
 
-def setHoldCurrent(percent):
-    print()
-    # c.write_single_register(0x0029, percent)
+    
+    
+    '''
 
 
 def polling_thread():
@@ -184,6 +175,7 @@ def polling_thread():
         time.sleep(1)
 
 
+'''
 # start polling thread
 tp = Thread(target=polling_thread)
 # set daemon: polling thread will exit if main thread exit
@@ -197,3 +189,6 @@ while True:
         print(regs)
     # 1s before next print
     time.sleep(1)
+'''
+
+main()
