@@ -25,12 +25,16 @@ regs_lock = Lock()
  — 0
 
 🔲 in case calculating is troublesome  Microstep resolution 0x0048
+🔲 error handling, logging
 
 '''
 
 register_size = 16
 max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
 modbus_client = None
+
+# default of 256, see command 0x0048
+steps_per_rev = 51200
 
 
 def convert_value_to_register(value, value_range, register_count):
@@ -86,7 +90,10 @@ writeActions = {
     "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
     "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
     "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2),
-    "error": WriteCommand(0x0021, (0, 0),1)
+    "error": WriteCommand(0x0021, (0, 0), 1),
+    "driveEnable": WriteCommand(0x001C, (0, 1), 1),
+    # default is 256 - 51200 steps / rev
+    "microStep": WriteCommand(0x0048, (1, 256), 1)
 }
 
 readAction = {
@@ -95,6 +102,11 @@ readAction = {
     "outputFault": ReadCommand(0x004E),
     "error": ReadCommand(0x0021)
 }
+
+
+def set_slew_revs_minute(revs):
+    value = round(revs * steps_per_rev)
+    writeActions["slew"].set_value(value)
 
 
 '''
@@ -126,9 +138,15 @@ def main():
     global modbus_client
     modbus_client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
     res = readAction["error"].get_regs(False)
-    if res is None:
+    if res is None or not writeActions["driveEnable"].set_value(1):
         exit("No device found, check connections")
     print("initialisation successful")
+
+    writeActions["slew"].set_value(0)
+    set_slew_revs_minute(25)
+
+
+
 
     '''
     print("testing")
@@ -137,7 +155,7 @@ def main():
     sleep(1)
     writeActions["runCurrent"].set_value(100)
     writeActions["setTorque"].set_value(100)
-    writeActions["slew"].set_value(-500000)
+    
     
     # writeActions["error"].set_value(0)
     print("success??")
