@@ -26,6 +26,8 @@ regs_lock = Lock()
 
 🔲 in case calculating is troublesome  Microstep resolution 0x0048
 🔲 error handling, logging
+🔲 make class importable as we need to run this with an UI
+🔲 read and write process may collide so there needs to be a semaphore of sorts
 
 '''
 
@@ -142,6 +144,12 @@ def main():
         exit("No device found, check connections")
     print("initialisation successful")
 
+    # start polling thread
+    tp = Thread(target=polling_thread)
+    # set daemon: polling thread will exit if main thread exit
+    tp.daemon = True
+    tp.start()
+
     try:
         writeActions["runCurrent"].set_value(100)
         set_slew_revs_minute(3)
@@ -178,39 +186,15 @@ def main():
 
 def polling_thread():
     """Modbus polling thread."""
-    global regs, regs_lock
-    c = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True)
-    # polling loop
-    print(c.write_multiple_registers(0x0078, [1, 0]))
-
-    return False
 
     while True:
-        # do modbus reading on socket
-        print(c.write_multiple_registers(0x0078, [1, 0]))
-        reg_list = c.read_holding_registers(5, 5)
-        # if read is ok, store result in regs (with thread lock)
-        if reg_list:
-            with regs_lock:
-                regs = list(reg_list)
-        # 1s before next polling
+
+        print(f"stalled: {readAction['stalled'].get_regs()}")
+        print(f"moving: {readAction['moving'].get_regs()}")
+        print(f"outputFault: {readAction['outputFault'].get_regs()}")
+        print(f"error: {readAction['error'].get_regs()}")
         time.sleep(1)
 
 
-'''
-# start polling thread
-tp = Thread(target=polling_thread)
-# set daemon: polling thread will exit if main thread exit
-tp.daemon = True
-tp.start()
-
-# display loop (in main thread)
-while True:
-    # print regs list (with thread lock synchronization)
-    with regs_lock:
-        print(regs)
-    # 1s before next print
-    time.sleep(1)
-'''
 
 main()
