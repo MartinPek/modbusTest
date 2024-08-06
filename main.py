@@ -142,10 +142,14 @@ def main():
         exit("No device found, check connections")
     print("initialisation successful")
 
+    try:
+        writeActions["runCurrent"].set_value(100)
+        set_slew_revs_minute(3)
+        sleep(10)
+    except KeyboardInterrupt:
+        writeActions["slew"].set_value(0)
+
     writeActions["slew"].set_value(0)
-    set_slew_revs_minute(25)
-
-
 
 
     '''
