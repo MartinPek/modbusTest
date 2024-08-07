@@ -3,6 +3,7 @@ import time
 from threading import Thread, Lock
 from pyModbusTCP.client import ModbusClient
 from time import sleep
+import json
 
 # https://pymodbustcp.readthedocs.io/en/stable/examples/client_thread.html
 
@@ -134,8 +135,31 @@ msb should be in the second register?
 
 '''
 
+def get_cfg():
+    try:
+        with open('config.json', 'r') as config_file:
+            return json.load(config_file)
+    except FileNotFoundError:
+        print("missing config file")
+    except json.decoder.JSONDecodeError as err:
+        print(f"Config error:\n{err} \ncannot open config")
+    exit()
+
+
+def run_preset(cfg):
+    # wild guess we are working with non programmers or matlab "people" (such an evil word)
+    start_index = cfg.get("startAt", 1) - 1
+    # print(step)
+    intervals = cfg.get("timeRevIntervals")
+    # print(intervals)
+
+    for interval in intervals[start_index:]:
+        set_slew_revs_minute(interval[1])
+        sleep(interval[0])
+
 
 def main():
+
     print("initalising device ...")
     global modbus_client
     modbus_client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
@@ -148,7 +172,10 @@ def main():
     tp = Thread(target=polling_thread)
     # set daemon: polling thread will exit if main thread exit
     tp.daemon = True
-    tp.start()
+    # tp.start()
+
+    sleep(1)
+    run_preset(get_cfg())
 
     try:
         writeActions["runCurrent"].set_value(100)
