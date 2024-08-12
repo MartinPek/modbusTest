@@ -108,7 +108,7 @@ readAction = {
 
 
 def set_slew_revs_minute(revs):
-    value = round(revs * steps_per_rev)
+    value = round((revs/60) * steps_per_rev)
     writeActions["slew"].set_value(value)
 
 
