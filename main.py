@@ -96,7 +96,8 @@ writeActions = {
     "error": WriteCommand(0x0021, (0, 0), 1),
     "driveEnable": WriteCommand(0x001C, (0, 1), 1),
     # default is 256 - 51200 steps / rev
-    "microStep": WriteCommand(0x0048, (1, 256), 1)
+    "microStep": WriteCommand(0x0048, (1, 256), 1),
+    "encodeEnable": WriteCommand(0x001E, (0, 1), 1)
 }
 
 readAction = {
@@ -179,7 +180,7 @@ def main():
 
     try:
         writeActions["runCurrent"].set_value(100)
-        set_slew_revs_minute(3)
+        writeActions["encodeEnable"].set_value(1)
         sleep(10)
     except KeyboardInterrupt:
         writeActions["slew"].set_value(0)
