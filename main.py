@@ -10,11 +10,6 @@ import json
 SERVER_HOST = '192.168.59.35'
 SERVER_PORT = 502
 
-# set global
-regs = []
-
-# init a thread lock
-regs_lock = Lock()
 
 '''
 @ TODO: 🔲 ✅
@@ -30,29 +25,29 @@ regs_lock = Lock()
 🔲 make class importable as we need to run this with an UI
 🔲 read and write process may collide so there needs to be a semaphore of sorts
 
+Stall mode 1 0x007A 1
+
 '''
 
-register_size = 16
-max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
-modbus_client = None
 
-# default of 256, see command 0x0048
-steps_per_rev = 51200
-
-
-def convert_value_to_register(value, value_range, register_count):
+def convert_value_to_register(self, value, value_range, register_count):
     clipped_value = max(min(value, value_range[1]), value_range[0])
     if clipped_value != value:
         print(f"Value: {value} was out of range {value_range}. Clipped to {clipped_value}")
         value = clipped_value
     abs_range = sum(abs(x) for x in value_range)
     # checking if it's a single register write, if so we can already skip all conversion
-    if abs_range < max_register_range:
+    if abs_range < self.max_register_range:
         return [value]
     else:
         high_register = (value >> 16) & 0xFFFF
         low_register = value & 0xFFFF
         return [low_register, high_register]
+
+
+def set_slew_revs_minute(self, revs):
+    value = round((revs/60) * self.steps_per_rev)
+    self.writeActions["slew"].set_value(value)
 
 
 class WriteCommand:
@@ -73,7 +68,6 @@ class WriteCommand:
 
         return False
 
-
 class ReadCommand:
     def __init__(self, register, register_count=1):
         self.register = register
@@ -87,100 +81,114 @@ class ReadCommand:
         return regs_l
 
 
-writeActions = {
-    "slew": WriteCommand(0x0078, (-5000000, +5000000), 2),
-    "holdCurrent": WriteCommand(0x0029, (0, 100), 1),   # default 5
-    "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
-    "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
-    "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2),
-    "error": WriteCommand(0x0021, (0, 0), 1),
-    "driveEnable": WriteCommand(0x001C, (0, 1), 1),
-    # default is 256 - 51200 steps / rev
-    "microStep": WriteCommand(0x0048, (1, 256), 1),
-    "encodeEnable": WriteCommand(0x001E, (0, 1), 1)
-}
+class ModBuscontroller():
 
-readAction = {
-    "stalled": ReadCommand(0x007B),
-    "moving": ReadCommand(0x004A),
-    "outputFault": ReadCommand(0x004E),
-    "error": ReadCommand(0x0021)
-}
+    register_size = 16
+    max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
 
+    # default of 256, see command 0x0048
+    steps_per_rev = 51200
 
-def set_slew_revs_minute(revs):
-    value = round((revs/60) * steps_per_rev)
-    writeActions["slew"].set_value(value)
+    def __init__(self):
+        self.modbus_client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
+        modbus_lock = Lock()
+        # start polling thread
+        self.polling_thread = Thread(target=self.polling_thread)
+        # set daemon: polling thread will exit if main thread exit
+        self.polling_thread.daemon = True
+        self.polling_thread.start()
 
+        self.writeActions = {
+            "slew": WriteCommand(0x0078, (-5000000, +5000000), 2),
+            "holdCurrent": WriteCommand(0x0029, (0, 100), 1),   # default 5
+            "runCurrent": WriteCommand(0x0067, (0, 100), 1),    # default 25
+            "setTorque": WriteCommand(0x00A6, (0, 100), 1),     # default 25
+            "setMaxVelocity": WriteCommand(0x008B, (+1, 2560000), 2),
+            "error": WriteCommand(0x0021, (0, 0), 1),
+            "driveEnable": WriteCommand(0x001C, (0, 1), 1),
+            # default is 256 - 51200 steps / rev
+            "microStep": WriteCommand(0x0048, (1, 256), 1),
+            "encodeEnable": WriteCommand(0x001E, (0, 1), 1)
+        }
 
-'''
-# 1 << 19 = 524288
-# [65535, (1 << 4)] seems to be the fastest speed it will actually run
-
-write_multiple_registers(0x0078
-[65535, 0] CW rot
-[0, 65535] CCW rot
-entering any negative number is out of range
-[x, 65535] CCW rot the larger x the slower 
-[65535, 65535] fails silently or pretty much doesnt move
-[1, 0] is extremely slow probably the LSB here
-[0, 1] is faster
-
-msb should be in the second register?
+        self.readAction = {
+            "stalled": ReadCommand(0x007B),
+            "moving": ReadCommand(0x004A),
+            "outputFault": ReadCommand(0x004E),
+            "error": ReadCommand(0x0021)
+        }
 
 
-[30534, ~300] goes crazy and stops moviing
-[65535, 1] CW rot
+    '''
+    # 1 << 19 = 524288
+    # [65535, (1 << 4)] seems to be the fastest speed it will actually run
+    
+    write_multiple_registers(0x0078
+    [65535, 0] CW rot
+    [0, 65535] CCW rot
+    entering any negative number is out of range
+    [x, 65535] CCW rot the larger x the slower 
+    [65535, 65535] fails silently or pretty much doesnt move
+    [1, 0] is extremely slow probably the LSB here
+    [0, 1] is faster
+    
+    msb should be in the second register?
+    
+    
+    [30534, ~300] goes crazy and stops moviing
+    [65535, 1] CW rot
+    
+    [65535, 5000000-65535] fails?
+    
+    '''
 
-[65535, 5000000-65535] fails?
-
-'''
-
-def get_cfg():
-    try:
-        with open('config.json', 'r') as config_file:
-            return json.load(config_file)
-    except FileNotFoundError:
-        print("missing config file")
-    except json.decoder.JSONDecodeError as err:
-        print(f"Config error:\n{err} \ncannot open config")
-    exit()
+    def get_cfg():
+        try:
+            with open('config.json', 'r') as config_file:
+                return json.load(config_file)
+        except FileNotFoundError:
+            print("missing config file")
+        except json.decoder.JSONDecodeError as err:
+            print(f"Config error:\n{err} \ncannot open config")
+        exit()
 
 
-def run_preset(cfg):
-    # wild guess we are working with non programmers or matlab "people" (such an evil word)
-    start_index = cfg.get("startAt", 1) - 1
-    # print(step)
-    intervals = cfg.get("timeRevIntervals")
-    # print(intervals)
+    def run_preset(cfg):
+        # wild guess we are working with non programmers or matlab "people" (such an evil word)
+        start_index = cfg.get("startAt", 1) - 1
+        # print(step)
+        intervals = cfg.get("timeRevIntervals")
+        # print(intervals)
 
-    for interval in intervals[start_index:]:
-        set_slew_revs_minute(interval[1])
-        sleep(interval[0])
+        for interval in intervals[start_index:]:
+            set_slew_revs_minute(interval[1])
+            sleep(interval[0])
+
+    def polling_thread():
+        """Modbus polling thread."""
+
+        while True:
+            print(f"stalled: {readAction['stalled'].get_regs()}")
+            print(f"moving: {readAction['moving'].get_regs()}")
+            print(f"outputFault: {readAction['outputFault'].get_regs()}")
+            print(f"error: {readAction['error'].get_regs()}")
+            time.sleep(1.5)
 
 
 def main():
 
-    print("initalising device ...")
-    global modbus_client
-    modbus_client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
     res = readAction["error"].get_regs(False)
     if res is None or not writeActions["driveEnable"].set_value(1):
         exit("No device found, check connections")
     print("initialisation successful")
 
-    # start polling thread
-    tp = Thread(target=polling_thread)
-    # set daemon: polling thread will exit if main thread exit
-    tp.daemon = True
-    # tp.start()
-
     sleep(1)
-    run_preset(get_cfg())
+    # run_preset(get_cfg())
 
     try:
-        writeActions["runCurrent"].set_value(100)
+        writeActions["runCurrent"].set_value(10)
         writeActions["encodeEnable"].set_value(1)
+        set_slew_revs_minute(20)
         sleep(10)
     except KeyboardInterrupt:
         writeActions["slew"].set_value(0)
@@ -212,16 +220,6 @@ def main():
     '''
 
 
-def polling_thread():
-    """Modbus polling thread."""
-
-    while True:
-
-        print(f"stalled: {readAction['stalled'].get_regs()}")
-        print(f"moving: {readAction['moving'].get_regs()}")
-        print(f"outputFault: {readAction['outputFault'].get_regs()}")
-        print(f"error: {readAction['error'].get_regs()}")
-        time.sleep(1)
 
 
 
