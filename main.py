@@ -84,7 +84,7 @@ class ModBuscontroller:
 
             return False
 
-    def __init__(self):
+    def __init__(self, run_preset=False):
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
         modbus_lock = Lock()
 
@@ -112,36 +112,15 @@ class ModBuscontroller:
         # set daemon: polling thread will exit if main thread exit
         self.polling_thread.daemon = True
         self.polling_thread.start()
+        if run_preset:
+            self.__run_preset(self.__get_cfg())
 
     def set_slew_revs_minute(self, revs):
         value = round((revs / 60) * self.steps_per_rev)
         self.writeActions["slew"].set_value(value)
 
-
-    '''
-    # 1 << 19 = 524288
-    # [65535, (1 << 4)] seems to be the fastest speed it will actually run
-    
-    write_multiple_registers(0x0078
-    [65535, 0] CW rot
-    [0, 65535] CCW rot
-    entering any negative number is out of range
-    [x, 65535] CCW rot the larger x the slower 
-    [65535, 65535] fails silently or pretty much doesnt move
-    [1, 0] is extremely slow probably the LSB here
-    [0, 1] is faster
-    
-    msb should be in the second register?
-    
-    
-    [30534, ~300] goes crazy and stops moviing
-    [65535, 1] CW rot
-    
-    [65535, 5000000-65535] fails?
-    
-    '''
-
-    def get_cfg(self):
+    @staticmethod
+    def __get_cfg():
         try:
             with open('config.json', 'r') as config_file:
                 return json.load(config_file)
@@ -151,16 +130,13 @@ class ModBuscontroller:
             print(f"Config error:\n{err} \ncannot open config")
         exit()
 
-    @staticmethod
-    def run_preset(cfg):
+    def __run_preset(self, cfg):
         # wild guess we are working with non programmers or matlab "people" (such an evil word)
         start_index = cfg.get("startAt", 1) - 1
-        # print(step)
         intervals = cfg.get("timeRevIntervals")
-        # print(intervals)
 
         for interval in intervals[start_index:]:
-            set_slew_revs_minute(interval[1])
+            self.set_slew_revs_minute(interval[1])
             sleep(interval[0])
 
     def polling_thread(self):
@@ -175,7 +151,7 @@ class ModBuscontroller:
 
 
 def main():
-    modbus_controller = ModBuscontroller()
+    modbus_controller = ModBuscontroller(True)
     modbus_controller.readAction["error"].get_regs(False)
 
     try:
