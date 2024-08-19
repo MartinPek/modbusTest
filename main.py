@@ -61,7 +61,7 @@ class ModBuscontroller:
             regs_l = self.modbus.client.read_holding_registers(self.register, self.register_count)
             if check_for_errors:
                 if regs_l is None:
-                    print("communication error, no value returned")
+                    print("communication error, no value returned\n")
             return regs_l
 
     class WriteCommand:
@@ -74,8 +74,7 @@ class ModBuscontroller:
         def set_value(self, value):
             register_value = self.modbus.convert_value_to_register(value, self.value_range, self.register_count)
             res = self.modbus.client.write_multiple_registers(self.register, register_value)
-            print(f"set value response is {res}")
-            if not (self.modbus.client.last_error and self.modbus.client.last_except):
+            if res or not (self.modbus.client.last_error and self.modbus.client.last_except):
                 return True
 
             # does this reset automatically with the next command? no manual function for that listed afaik
@@ -107,11 +106,13 @@ class ModBuscontroller:
             "outputFault": self.ReadCommand(self, 0x004E),
             "error": self.ReadCommand(self, 0x0021)
         }
+        self.writeActions["encodeEnable"].set_value(1)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
         self.polling_thread.daemon = True
         self.polling_thread.start()
+
         if run_preset:
             self.__run_preset(self.__get_cfg())
 
@@ -136,68 +137,37 @@ class ModBuscontroller:
         intervals = cfg.get("timeRevIntervals")
 
         for interval in intervals[start_index:]:
-            self.set_slew_revs_minute(interval[1])
-            sleep(interval[0])
+            try:
+                self.set_slew_revs_minute(interval[1])
+                sleep(interval[0])
+            except KeyboardInterrupt:
+                return
 
     def polling_thread(self):
         """Modbus polling thread."""
 
         while True:
             print(f"stalled: {self.readAction['stalled'].get_regs()}")
-            # print(f"moving: {readAction['moving'].get_regs()}")
-            # print(f"outputFault: {readAction['outputFault'].get_regs()}")
-            # print(f"error: {readAction['error'].get_regs()}")
+            print(f"moving: {self.readAction['moving'].get_regs()}")
+            print(f"outputFault: {self.readAction['outputFault'].get_regs()}")
+            print(f"error: {self.readAction['error'].get_regs()}")
             time.sleep(1.5)
 
 
 def main():
-    modbus_controller = ModBuscontroller(True)
+    run_preset = True
+    modbus_controller = ModBuscontroller(run_preset)
     modbus_controller.readAction["error"].get_regs(False)
 
-    try:
-        modbus_controller.writeActions["runCurrent"].set_value(10)
-        modbus_controller.writeActions["encodeEnable"].set_value(1)
-        modbus_controller.set_slew_revs_minute(20)
-        sleep(10)
-    except KeyboardInterrupt:
-        modbus_controller.writeActions["slew"].set_value(0)
+    if not run_preset:
+        try:
+            modbus_controller.writeActions["runCurrent"].set_value(10)
+            modbus_controller.set_slew_revs_minute(20)
+            sleep(10)
+        except KeyboardInterrupt:
+            modbus_controller.writeActions["slew"].set_value(0)
 
     modbus_controller.writeActions["slew"].set_value(0)
-
-    '''
-    res = readAction["error"].get_regs(False)
-    if res is None or not writeActions["driveEnable"].set_value(1):
-        exit("No device found, check connections")
-    print("initialisation successful")
-
-    sleep(1)
-    # run_preset(get_cfg())
-
-
-
-
-
-    print("testing")
-
-    print(modbus_client.write_multiple_registers(0x0078, [0, 0]))
-    sleep(1)
-    writeActions["runCurrent"].set_value(100)
-    writeActions["setTorque"].set_value(100)
-    
-    
-    # writeActions["error"].set_value(0)
-    print("success??")
-    sleep(3)
-    print(modbus_client.last_error)
-    print(modbus_client.last_except)
-    print(modbus_client.last_error_as_txt)
-    print(modbus_client.last_except_as_full_txt)
-    print(modbus_client.write_multiple_registers(0x0078, [0, 0]))
-    exit()
-
-    
-    
-    '''
 
 
 if __name__ == "__main__":
