@@ -59,9 +59,9 @@ class ModBuscontroller:
             self.modbus = modbus
 
         def get_regs(self, check_for_errors=True):
-            self.modbus.__modbus_lock.acquire()
+            self.modbus.bus_semaphore.acquire()
             regs_l = self.modbus.client.read_holding_registers(self.register, self.register_count)
-            self.modbus.__modbus_lock.release()
+            self.modbus.bus_semaphore.release()
             if check_for_errors:
                 if regs_l is None:
                     print("communication error, no value returned\n")
@@ -87,9 +87,9 @@ class ModBuscontroller:
 
         def set_value(self, value):
             register_value = self.modbus.convert_value_to_register(value, self.value_range, self.register_count)
-            self.modbus.__modbus_lock.acquire()
+            self.modbus.bus_semaphore.acquire()
             res = self.modbus.client.write_multiple_registers(self.register, register_value)
-            self.modbus.__modbus_lock.release()
+            self.modbus.bus_semaphore.release()
             if res or not (self.modbus.client.last_error and self.modbus.client.last_except):
                 return True
 
@@ -103,7 +103,7 @@ class ModBuscontroller:
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
         self.stall_occured = False
         self.last_slew = 0
-        self.__modbus_lock = Lock()
+        self.bus_semaphore = Lock()
         self.total_steps = 0
         self.step_overflow = 0
 
