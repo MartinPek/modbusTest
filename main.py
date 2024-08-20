@@ -104,6 +104,8 @@ class ModBuscontroller:
         self.stall_occured = False
         self.last_slew = 0
         self.__modbus_lock = Lock()
+        self.total_steps = 0
+        self.step_overflow = 0
 
         self.writeActions = {
             "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
@@ -115,7 +117,8 @@ class ModBuscontroller:
             "driveEnable": self.WriteCommand(self, 0x001C, (0, 1), 1),
             # default is 256 - 51200 steps / rev
             "microStep": self.WriteCommand(self, 0x0048, (1, 256), 1),
-            "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1)
+            "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1),
+            "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2)
         }
 
         self.readAction = {
@@ -177,10 +180,16 @@ class ModBuscontroller:
             if stalled or (not moving and self.last_slew):
                 self.stall_occured = True
                 self.writeActions["slew"].set_value(self.last_slew)
-                sleep(0.1)
             print(f"outputFault: {self.readAction['outputFault'].get_regs()}")
             print(f"error: {self.readAction['error'].get_regs()}")
-            print(f"position: {self.readAction['position'].get_regs()}")
+            position = self.readAction['position'].get_regs()
+            print(f"position: {position}")
+            # an overflow hitting 32 uint limit is 41943,04 revolutions with the default resolution
+            if abs(position) > 1 << 30:
+                self.step_overflow += position
+                self.writeActions['position'].set_value(0)
+            self.total_steps = self.step_overflow + position
+            print(f"total steps: {self.total_steps}")
             print(f"veclocity: {self.readAction['velocity'].get_regs()}")
             time.sleep(1.5)
 
