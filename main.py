@@ -63,7 +63,18 @@ class ModBuscontroller:
             if check_for_errors:
                 if regs_l is None:
                     print("communication error, no value returned\n")
-            return regs_l
+
+            if len(regs_l) > 2:
+                print("unexpected return length")
+                return False
+            if len(regs_l) == 2:
+                low_register, high_register = regs_l
+                combined_value = (high_register << 16) | low_register
+                if combined_value & (1 << 31):
+                    combined_value -= (1 << 32)
+                regs_l = [combined_value]
+
+            return regs_l[0]
 
     class WriteCommand:
         def __init__(self, modbus, register, value_range, register_count):
@@ -107,7 +118,10 @@ class ModBuscontroller:
             "stalled": self.ReadCommand(self, 0x007B),
             "moving": self.ReadCommand(self, 0x004A),
             "outputFault": self.ReadCommand(self, 0x004E),
-            "error": self.ReadCommand(self, 0x0021)
+            "error": self.ReadCommand(self, 0x0021),
+            # If hybrid circuitry is in make-up mode, 0x0085-86 will not return an accurate value.
+            # When the hybrid product is in torque control mode 0x0085-86 will return a zero (0).
+            "velocity": self.ReadCommand(self, 0x0085, 2)
         }
         self.writeActions["encodeEnable"].set_value(1)
 
