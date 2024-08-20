@@ -15,17 +15,18 @@ SERVER_PORT = 502
 @ TODO: 🔲 ✅
 
 🔲 Timeouts is very long also doesnt crop up when setting up the device when unplugged
-
 🔲 Error 0x0021 2 Variable holds the error code of the last error. 
  must be read or set to 0 to clear.
  — 0
 
 🔲 in case calculating is troublesome  Microstep resolution 0x0048
 🔲 error handling, logging
-🔲 make class importable as we need to run this with an UI
+🔲 reset error flag after printing, make a function to print and reset errors, this can be later hooked up to logging
+✅ make class importable as we need to run this with an UI
 🔲 read and write process may collide so there needs to be a semaphore of sorts
 🔲 register_count is not properly handled
 🔲 self.last_slew = value for running the writecommand
+🔲 volumenstrom berechnen
 
 '''
 
@@ -34,7 +35,6 @@ class ModBuscontroller:
 
     register_size = 16
     max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
-
     # default of 256, see command 0x0048
     steps_per_rev = 51200
 
@@ -88,7 +88,7 @@ class ModBuscontroller:
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
         self.stall_occured = False
         self.last_slew = 0
-        modbus_lock = Lock()
+        self.modbus_lock = Lock()
 
         self.writeActions = {
             "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
