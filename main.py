@@ -121,7 +121,8 @@ class ModBuscontroller:
             "error": self.ReadCommand(self, 0x0021),
             # If hybrid circuitry is in make-up mode, 0x0085-86 will not return an accurate value.
             # When the hybrid product is in torque control mode 0x0085-86 will return a zero (0).
-            "velocity": self.ReadCommand(self, 0x0085, 2)
+            "velocity": self.ReadCommand(self, 0x0085, 2),
+            "position": self.ReadCommand(self, 0x0057, 2)
         }
         self.writeActions["encodeEnable"].set_value(1)
 
@@ -175,6 +176,8 @@ class ModBuscontroller:
                 sleep(0.1)
             print(f"outputFault: {self.readAction['outputFault'].get_regs()}")
             print(f"error: {self.readAction['error'].get_regs()}")
+            print(f"position: {self.readAction['position'].get_regs()}")
+            print(f"veclocity: {self.readAction['velocity'].get_regs()}")
             time.sleep(1.5)
 
 
