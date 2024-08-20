@@ -25,6 +25,7 @@ SERVER_PORT = 502
 🔲 make class importable as we need to run this with an UI
 🔲 read and write process may collide so there needs to be a semaphore of sorts
 🔲 register_count is not properly handled
+🔲 self.last_slew = value for running the writecommand
 
 '''
 
@@ -85,6 +86,8 @@ class ModBuscontroller:
 
     def __init__(self, run_preset=False):
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
+        self.stall_occured = False
+        self.last_slew = 0
         modbus_lock = Lock()
 
         self.writeActions = {
@@ -119,6 +122,7 @@ class ModBuscontroller:
     def set_slew_revs_minute(self, revs):
         value = round((revs / 60) * self.steps_per_rev)
         self.writeActions["slew"].set_value(value)
+        self.last_slew = value
 
     @staticmethod
     def __get_cfg():
@@ -147,15 +151,21 @@ class ModBuscontroller:
         """Modbus polling thread."""
 
         while True:
-            print(f"stalled: {self.readAction['stalled'].get_regs()}")
-            print(f"moving: {self.readAction['moving'].get_regs()}")
+            stalled = self.readAction['stalled'].get_regs()
+            moving = self.readAction['moving'].get_regs()
+            print(f"stalled: {stalled}")
+            print(f"moving: {moving}")
+            if stalled or (not moving and self.last_slew):
+                self.stall_occured = True
+                self.writeActions["slew"].set_value(self.last_slew)
+                sleep(0.1)
             print(f"outputFault: {self.readAction['outputFault'].get_regs()}")
             print(f"error: {self.readAction['error'].get_regs()}")
             time.sleep(1.5)
 
 
 def main():
-    run_preset = True
+    run_preset = False
     modbus_controller = ModBuscontroller(run_preset)
     modbus_controller.readAction["error"].get_regs(False)
 
@@ -163,7 +173,7 @@ def main():
         try:
             modbus_controller.writeActions["runCurrent"].set_value(10)
             modbus_controller.set_slew_revs_minute(20)
-            sleep(10)
+            sleep(20)
         except KeyboardInterrupt:
             modbus_controller.writeActions["slew"].set_value(0)
 
