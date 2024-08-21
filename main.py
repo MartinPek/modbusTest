@@ -58,13 +58,13 @@ class ModBuscontroller:
             self.register_count = register_count
             self.modbus = modbus
 
-        def get_regs(self, check_for_errors=True):
+        def get_regs(self):
             self.modbus.bus_semaphore.acquire()
             regs_l = self.modbus.client.read_holding_registers(self.register, self.register_count)
             self.modbus.bus_semaphore.release()
-            if check_for_errors:
-                if regs_l is None:
-                    print("communication error, no value returned\n")
+
+            if regs_l is None:
+                print("communication error, no value returned\n")
 
             if len(regs_l) > 2:
                 print("unexpected return length")
@@ -197,7 +197,7 @@ class ModBuscontroller:
 def main():
     run_preset = False
     modbus_controller = ModBuscontroller(run_preset)
-    modbus_controller.readAction["error"].get_regs(False)
+    modbus_controller.readAction["error"].get_regs()
 
     if not run_preset:
         try:
