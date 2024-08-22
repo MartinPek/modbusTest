@@ -134,6 +134,7 @@ class ModbusController:
         }
         self.writeActions["encodeEnable"].set_value(1)
         self.writeActions['error'].set_value(0)
+        self.writeActions['position'].set_value(0)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
@@ -192,10 +193,10 @@ class ModbusController:
             position = self.readAction['position'].get_regs()
             print(f"position: {position}")
             # an overflow hitting 32 uint limit is 41943,04 revolutions with the default resolution
+            self.total_steps = self.step_overflow + position
             if abs(position) > 1 << 30:
                 self.step_overflow += position
                 self.writeActions['position'].set_value(0)
-            self.total_steps = self.step_overflow + position
             print(f"total steps: {self.total_steps}")
             print(f"veclocity: {self.readAction['velocity'].get_regs()}")
 
