@@ -5,13 +5,13 @@ from pyModbusTCP.client import ModbusClient
 from time import sleep
 import json
 
-# https://pymodbustcp.readthedocs.io/en/stable/examples/client_thread.html
 
 SERVER_HOST = '192.168.59.35'
 SERVER_PORT = 502
 
-
 '''
+https://pymodbustcp.readthedocs.io/en/stable/examples/client_thread.html
+https://novantaims.com/downloads/manuals/modbus_tcp.pdf
 @ TODO: 🔲 ✅
 
 🔲 Timeouts is very long also doesnt crop up when setting up the device when unplugged
@@ -28,10 +28,11 @@ SERVER_PORT = 502
 🔲 self.last_slew = value for running the writecommand
 🔲 volumenstrom berechnen
 
+
 '''
 
 
-class ModBuscontroller:
+class ModbusController:
 
     register_size = 16
     max_register_range = 1 << register_size    # amount of value, the max value is one less since 0 is also a number
@@ -132,6 +133,7 @@ class ModBuscontroller:
             "position": self.ReadCommand(self, 0x0057, 2)
         }
         self.writeActions["encodeEnable"].set_value(1)
+        self.writeActions['error'].set_value(0)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
@@ -170,18 +172,23 @@ class ModBuscontroller:
                 return
 
     def polling_thread(self):
-        """Modbus polling thread."""
 
         while True:
-            stalled = self.readAction['stalled'].get_regs()
+            # stalled flag doesnt change
+            stalled = False
+            # stalled = self.readAction['stalled'].get_regs()
+            # print(f"stalled: {stalled}")
+
             moving = self.readAction['moving'].get_regs()
-            print(f"stalled: {stalled}")
             print(f"moving: {moving}")
             if stalled or (not moving and self.last_slew):
                 self.stall_occured = True
+                '''
+                right here an error is thrown but without consequences as much as i can tell, delays don't fix this
+                modbus exception
+                Unrecoverable error occurred while slave was attempting to perform requested action.
+                '''
                 self.writeActions["slew"].set_value(self.last_slew)
-            print(f"outputFault: {self.readAction['outputFault'].get_regs()}")
-            print(f"error: {self.readAction['error'].get_regs()}")
             position = self.readAction['position'].get_regs()
             print(f"position: {position}")
             # an overflow hitting 32 uint limit is 41943,04 revolutions with the default resolution
@@ -191,12 +198,21 @@ class ModBuscontroller:
             self.total_steps = self.step_overflow + position
             print(f"total steps: {self.total_steps}")
             print(f"veclocity: {self.readAction['velocity'].get_regs()}")
+
+            err = self.readAction['error'].get_regs()
+            if err:
+                print(f"error: {err}")
+                self.writeActions['error'].set_value(0)
+                output_fault = self.readAction['outputFault'].get_regs()
+                if output_fault:
+                    print(f"outputFault: {output_fault}")
+
             time.sleep(1.5)
 
 
 def main():
     run_preset = False
-    modbus_controller = ModBuscontroller(run_preset)
+    modbus_controller = ModbusController(run_preset)
     modbus_controller.readAction["error"].get_regs()
 
     if not run_preset:
