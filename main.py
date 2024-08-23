@@ -27,7 +27,7 @@ https://novantaims.com/downloads/manuals/modbus_tcp.pdf
 🔲 register_count is not properly handled
 🔲 self.last_slew = value for running the writecommand
 🔲 volumenstrom berechnen
-🔲 enable makeup mode Make up 0x00A0 to 1
+✅ enable makeup mode Make up 0x00A0 to 1
 
 Pyqt mit startbutton/stopp für runpreset
 mit parameter anzeigen
@@ -129,7 +129,8 @@ class ModbusController:
             # default is 256 - 51200 steps / rev
             "microStep": self.WriteCommand(self, 0x0048, (1, 256), 1),
             "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1),
-            "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2)
+            "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2),
+            "make_up": self.WriteCommand(self, 0x00A0, (0, 2), 1)
         }
 
         self.readAction = {
@@ -146,6 +147,7 @@ class ModbusController:
         self.writeActions["encodeEnable"].set_value(1)
         self.writeActions['error'].set_value(0)
         self.writeActions['position'].set_value(0)
+        self.writeActions['make_up'].set_value(1)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
