@@ -25,7 +25,7 @@ https://novantaims.com/downloads/manuals/modbus_tcp.pdf
 ✅ make class importable as we need to run this with an UI
 ✅ read and write process may collide so there needs to be a semaphore of sorts
 🔲 register_count is not properly handled
-🔲 self.last_slew = value for running the writecommand
+✅ self.last_slew = value for running the writecommand
 🔲 volumenstrom berechnen
 ✅ enable makeup mode Make up 0x00A0 to 1
 
@@ -118,7 +118,7 @@ class ModbusController:
         self.total_steps = 0
         self.step_overflow = 0
 
-        self.writeActions = {
+        self.__writeActions = {
             "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
             "holdCurrent": self.WriteCommand(self, 0x0029, (0, 100), 1),   # default 5
             "runCurrent": self.WriteCommand(self, 0x0067, (0, 100), 1),    # default 25
@@ -130,10 +130,10 @@ class ModbusController:
             "microStep": self.WriteCommand(self, 0x0048, (1, 256), 1),
             "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1),
             "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2),
-            "make_up": self.WriteCommand(self, 0x00A0, (0, 2), 1)
+            "makeUp": self.WriteCommand(self, 0x00A0, (0, 2), 1)
         }
 
-        self.readAction = {
+        self.__readAction = {
             "stalled": self.ReadCommand(self, 0x007B),
             "moving": self.ReadCommand(self, 0x004A),
             "outputFault": self.ReadCommand(self, 0x004E),
@@ -144,10 +144,10 @@ class ModbusController:
             "position": self.ReadCommand(self, 0x0057, 2)
         }
 
-        self.writeActions["encodeEnable"].set_value(1)
-        self.writeActions['error'].set_value(0)
-        self.writeActions['position'].set_value(0)
-        self.writeActions['make_up'].set_value(1)
+        self.__writeActions["encodeEnable"].set_value(1)
+        self.__writeActions['error'].set_value(0)
+        self.__writeActions['position'].set_value(0)
+        self.__writeActions['make_up'].set_value(1)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
@@ -157,10 +157,16 @@ class ModbusController:
         if run_preset:
             self.__run_preset(self.__get_cfg())
 
+    def set_run_current(self, value):
+        self.__writeActions["runCurrent"].set_value(100)
+
+    def set_slew(self, value):
+        self.__writeActions["slew"].set_value(value)
+        self.last_slew = value
+
     def set_slew_revs_minute(self, revs):
         value = round((revs / 60) * self.steps_per_rev)
-        self.writeActions["slew"].set_value(value)
-        self.last_slew = value
+        self.set_slew(value)
 
     @staticmethod
     def __get_cfg():
@@ -191,7 +197,7 @@ class ModbusController:
             # stalled flag doesnt change
             stalled = False
 
-            moving = self.readAction['moving'].get_regs()
+            moving = self.__readAction['moving'].get_regs()
             print(f"moving: {moving}")
             if stalled or (not moving and self.last_slew):
                 self.stall_occured = True
@@ -200,22 +206,22 @@ class ModbusController:
                 modbus exception
                 Unrecoverable error occurred while slave was attempting to perform requested action.
                 '''
-                self.writeActions["slew"].set_value(self.last_slew)
-            position = self.readAction['position'].get_regs()
+                self.__writeActions["slew"].set_value(self.last_slew)
+            position = self.__readAction['position'].get_regs()
             print(f"position: {position}")
             # an overflow hitting 32 uint limit is 41943,04 revolutions with the default resolution
             self.total_steps = self.step_overflow + position
             if abs(position) > 1 << 30:
                 self.step_overflow += position
-                self.writeActions['position'].set_value(0)
+                self.__writeActions['position'].set_value(0)
             print(f"total steps: {self.total_steps}")
-            print(f"veclocity: {self.readAction['velocity'].get_regs()}")
+            print(f"veclocity: {self.__readAction['velocity'].get_regs()}")
 
-            err = self.readAction['error'].get_regs()
+            err = self.__readAction['error'].get_regs()
             if err:
                 print(f"error: {err}")
-                self.writeActions['error'].set_value(0)
-                output_fault = self.readAction['outputFault'].get_regs()
+                self.__writeActions['error'].set_value(0)
+                output_fault = self.__readAction['outputFault'].get_regs()
                 if output_fault:
                     print(f"outputFault: {output_fault}")
 
@@ -225,17 +231,17 @@ class ModbusController:
 def main():
     run_preset = True
     modbus_controller = ModbusController(run_preset)
-    modbus_controller.readAction["error"].get_regs()
+    # modbus_controller.__readAction["error"].get_regs()
 
     if not run_preset:
         try:
-            modbus_controller.writeActions["runCurrent"].set_value(100)
-            modbus_controller.set_slew_revs_minute(10)
+            modbus_controller.set_run_current(100)
+            modbus_controller.set_slew_revs_minute(20)
             sleep(20)
         except KeyboardInterrupt:
-            modbus_controller.writeActions["slew"].set_value(0)
+            modbus_controller.set_slew(0)
 
-    modbus_controller.writeActions["slew"].set_value(0)
+    modbus_controller.set_slew(0)
 
 
 if __name__ == "__main__":
