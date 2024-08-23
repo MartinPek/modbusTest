@@ -23,10 +23,17 @@ https://novantaims.com/downloads/manuals/modbus_tcp.pdf
 🔲 error handling, logging
 🔲 reset error flag after printing, make a function to print and reset errors, this can be later hooked up to logging
 ✅ make class importable as we need to run this with an UI
-🔲 read and write process may collide so there needs to be a semaphore of sorts
+✅ read and write process may collide so there needs to be a semaphore of sorts
 🔲 register_count is not properly handled
 🔲 self.last_slew = value for running the writecommand
 🔲 volumenstrom berechnen
+🔲 enable makeup mode Make up 0x00A0 to 1
+
+Pyqt mit startbutton/stopp für runpreset
+mit parameter anzeigen
+restdauer
+
+ist soll profil mit aktuellem zeitpunk
 
 
 '''
@@ -66,6 +73,7 @@ class ModbusController:
 
             if regs_l is None:
                 print("communication error, no value returned\n")
+                return False
 
             if len(regs_l) > 2:
                 print("unexpected return length")
@@ -102,9 +110,11 @@ class ModbusController:
 
     def __init__(self, run_preset=False):
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
+        self.bus_semaphore = Lock()
+        self.run_preset = False
+
         self.stall_occured = False
         self.last_slew = 0
-        self.bus_semaphore = Lock()
         self.total_steps = 0
         self.step_overflow = 0
 
@@ -132,6 +142,7 @@ class ModbusController:
             "velocity": self.ReadCommand(self, 0x0085, 2),
             "position": self.ReadCommand(self, 0x0057, 2)
         }
+
         self.writeActions["encodeEnable"].set_value(1)
         self.writeActions['error'].set_value(0)
         self.writeActions['position'].set_value(0)
@@ -177,8 +188,6 @@ class ModbusController:
         while True:
             # stalled flag doesnt change
             stalled = False
-            # stalled = self.readAction['stalled'].get_regs()
-            # print(f"stalled: {stalled}")
 
             moving = self.readAction['moving'].get_regs()
             print(f"moving: {moving}")
@@ -212,14 +221,14 @@ class ModbusController:
 
 
 def main():
-    run_preset = False
+    run_preset = True
     modbus_controller = ModbusController(run_preset)
     modbus_controller.readAction["error"].get_regs()
 
     if not run_preset:
         try:
-            modbus_controller.writeActions["runCurrent"].set_value(10)
-            modbus_controller.set_slew_revs_minute(20)
+            modbus_controller.writeActions["runCurrent"].set_value(100)
+            modbus_controller.set_slew_revs_minute(10)
             sleep(20)
         except KeyboardInterrupt:
             modbus_controller.writeActions["slew"].set_value(0)
