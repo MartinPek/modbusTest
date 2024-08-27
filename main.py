@@ -45,6 +45,60 @@ class ModbusController:
     # default of 256, see command 0x0048
     steps_per_rev = 51200
 
+    def __init__(self, run_preset=False):
+        self.__cfg = self.__get_cfg()
+        self.__steps_per_liter = self.__cfg.get("steps_per_liter", 0)
+        if not self.__steps_per_liter:
+            exit("invalud steps to volume conversion in config file")
+        self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
+        self.bus_semaphore = Lock()
+        self.run_preset = False
+
+        self.stall_occured = False
+        self.last_slew = 0
+        self.total_steps = 0
+        self.step_overflow = 0
+        self.total_volume = 0
+
+        self.__writeActions = {
+            "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
+            "holdCurrent": self.WriteCommand(self, 0x0029, (0, 100), 1),   # default 5
+            "runCurrent": self.WriteCommand(self, 0x0067, (0, 100), 1),    # default 25
+            "setTorque": self.WriteCommand(self, 0x00A6, (0, 100), 1),     # default 25
+            "setMaxVelocity": self.WriteCommand(self, 0x008B, (+1, 2560000), 2),
+            "error": self.WriteCommand(self, 0x0021, (0, 0), 1),
+            "driveEnable": self.WriteCommand(self, 0x001C, (0, 1), 1),
+            # default is 256 - 51200 steps / rev
+            "microStep": self.WriteCommand(self, 0x0048, (1, 256), 1),
+            "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1),
+            "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2),
+            "makeUp": self.WriteCommand(self, 0x00A0, (0, 2), 1)
+        }
+
+        self.__readAction = {
+            "stalled": self.ReadCommand(self, 0x007B),
+            "moving": self.ReadCommand(self, 0x004A),
+            "outputFault": self.ReadCommand(self, 0x004E),
+            "error": self.ReadCommand(self, 0x0021),
+            # If hybrid circuitry is in make-up mode, 0x0085-86 will not return an accurate value.
+            # When the hybrid product is in torque control mode 0x0085-86 will return a zero (0).
+            "velocity": self.ReadCommand(self, 0x0085, 2),
+            "position": self.ReadCommand(self, 0x0057, 2)
+        }
+
+        self.__writeActions["encodeEnable"].set_value(1)
+        self.__writeActions['error'].set_value(0)
+        self.__writeActions['position'].set_value(0)
+        self.__writeActions['makeUp'].set_value(1)
+
+        self.polling_thread = Thread(target=self.polling_thread)
+        # set daemon: polling thread will exit if main thread exit
+        self.polling_thread.daemon = True
+        self.polling_thread.start()
+
+        if run_preset:
+            self.__run_preset()
+            
     def convert_value_to_register(self, value, value_range, register_count):
         clipped_value = max(min(value, value_range[1]), value_range[0])
         if clipped_value != value:
@@ -106,60 +160,6 @@ class ModbusController:
             print(self.modbus.client.last_except_as_full_txt)
 
             return False
-
-    def __init__(self, run_preset=False):
-        self.__cfg = self.__get_cfg()
-        self.__steps_per_liter = self.__cfg.get("steps_per_liter", 0)
-        if not self.__steps_per_liter:
-            exit("invalud steps to volume conversion in config file")
-        self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
-        self.bus_semaphore = Lock()
-        self.run_preset = False
-
-        self.stall_occured = False
-        self.last_slew = 0
-        self.total_steps = 0
-        self.step_overflow = 0
-        self.total_volume = 0
-
-        self.__writeActions = {
-            "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
-            "holdCurrent": self.WriteCommand(self, 0x0029, (0, 100), 1),   # default 5
-            "runCurrent": self.WriteCommand(self, 0x0067, (0, 100), 1),    # default 25
-            "setTorque": self.WriteCommand(self, 0x00A6, (0, 100), 1),     # default 25
-            "setMaxVelocity": self.WriteCommand(self, 0x008B, (+1, 2560000), 2),
-            "error": self.WriteCommand(self, 0x0021, (0, 0), 1),
-            "driveEnable": self.WriteCommand(self, 0x001C, (0, 1), 1),
-            # default is 256 - 51200 steps / rev
-            "microStep": self.WriteCommand(self, 0x0048, (1, 256), 1),
-            "encodeEnable": self.WriteCommand(self, 0x001E, (0, 1), 1),
-            "position": self.WriteCommand(self, 0x0057, (-2147483648, 2147483647), 2),
-            "makeUp": self.WriteCommand(self, 0x00A0, (0, 2), 1)
-        }
-
-        self.__readAction = {
-            "stalled": self.ReadCommand(self, 0x007B),
-            "moving": self.ReadCommand(self, 0x004A),
-            "outputFault": self.ReadCommand(self, 0x004E),
-            "error": self.ReadCommand(self, 0x0021),
-            # If hybrid circuitry is in make-up mode, 0x0085-86 will not return an accurate value.
-            # When the hybrid product is in torque control mode 0x0085-86 will return a zero (0).
-            "velocity": self.ReadCommand(self, 0x0085, 2),
-            "position": self.ReadCommand(self, 0x0057, 2)
-        }
-
-        self.__writeActions["encodeEnable"].set_value(1)
-        self.__writeActions['error'].set_value(0)
-        self.__writeActions['position'].set_value(0)
-        self.__writeActions['makeUp'].set_value(1)
-
-        self.polling_thread = Thread(target=self.polling_thread)
-        # set daemon: polling thread will exit if main thread exit
-        self.polling_thread.daemon = True
-        self.polling_thread.start()
-
-        if run_preset:
-            self.__run_preset()
 
     def set_run_current(self, value):
         self.__writeActions["runCurrent"].set_value(100)
