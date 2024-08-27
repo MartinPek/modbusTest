@@ -19,14 +19,13 @@ https://novantaims.com/downloads/manuals/modbus_tcp.pdf
  must be read or set to 0 to clear.
  — 0
 
-🔲 in case calculating is troublesome  Microstep resolution 0x0048
 🔲 error handling, logging
 🔲 reset error flag after printing, make a function to print and reset errors, this can be later hooked up to logging
 ✅ make class importable as we need to run this with an UI
 ✅ read and write process may collide so there needs to be a semaphore of sorts
 🔲 register_count is not properly handled
 ✅ self.last_slew = value for running the writecommand
-🔲 volumenstrom berechnen
+✅ volumenstrom berechnen
 ✅ enable makeup mode Make up 0x00A0 to 1
 
 Pyqt mit startbutton/stopp für runpreset
@@ -109,6 +108,10 @@ class ModbusController:
             return False
 
     def __init__(self, run_preset=False):
+        self.__cfg = self.__get_cfg()
+        self.__steps_per_liter = self.__cfg.get("steps_per_liter", 0)
+        if not self.__steps_per_liter:
+            exit("invalud steps to volume conversion in config file")
         self.client = ModbusClient(host=SERVER_HOST, port=SERVER_PORT, auto_open=True, timeout=5)
         self.bus_semaphore = Lock()
         self.run_preset = False
@@ -117,6 +120,7 @@ class ModbusController:
         self.last_slew = 0
         self.total_steps = 0
         self.step_overflow = 0
+        self.total_volume = 0
 
         self.__writeActions = {
             "slew": self.WriteCommand(self, 0x0078, (-5000000, +5000000), 2),
@@ -147,7 +151,7 @@ class ModbusController:
         self.__writeActions["encodeEnable"].set_value(1)
         self.__writeActions['error'].set_value(0)
         self.__writeActions['position'].set_value(0)
-        self.__writeActions['make_up'].set_value(1)
+        self.__writeActions['makeUp'].set_value(1)
 
         self.polling_thread = Thread(target=self.polling_thread)
         # set daemon: polling thread will exit if main thread exit
@@ -155,7 +159,7 @@ class ModbusController:
         self.polling_thread.start()
 
         if run_preset:
-            self.__run_preset(self.__get_cfg())
+            self.__run_preset()
 
     def set_run_current(self, value):
         self.__writeActions["runCurrent"].set_value(100)
@@ -179,10 +183,10 @@ class ModbusController:
             print(f"Config error:\n{err} \ncannot open config")
         exit()
 
-    def __run_preset(self, cfg):
+    def __run_preset(self):
         # wild guess we are working with non programmers or matlab "people" (such an evil word)
-        start_index = cfg.get("startAt", 1) - 1
-        intervals = cfg.get("timeRevIntervals")
+        start_index = self.__cfg.get("startAt", 1) - 1
+        intervals = self.__cfg.get("timeRevIntervals")
 
         for interval in intervals[start_index:]:
             try:
@@ -211,11 +215,14 @@ class ModbusController:
             print(f"position: {position}")
             # an overflow hitting 32 uint limit is 41943,04 revolutions with the default resolution
             self.total_steps = self.step_overflow + position
+            self.total_volume = self.total_steps / self.__steps_per_liter
             if abs(position) > 1 << 30:
                 self.step_overflow += position
                 self.__writeActions['position'].set_value(0)
-            print(f"total steps: {self.total_steps}")
-            print(f"veclocity: {self.__readAction['velocity'].get_regs()}")
+            print(f"total volume: {self.total_volume} L / total steps: {self.total_steps}")
+            velocity = self.__readAction['velocity'].get_regs()
+            print(f"velocity: {velocity} steps/s")
+            print(f"flowrate: {60 * velocity / self.__steps_per_liter} L/min")
 
             err = self.__readAction['error'].get_regs()
             if err:
